@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="nl">
+<head>
+    <meta charset="utf-8">
+    <title>Wi-Spy DBx3 Field Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <h1>Wi-Spy DBx3 Field Analyzer</h1>
+    <div class="subtitle">Live 2.4 GHz spectrum + field verdict</div>
+
+    <div class="toolbar">
+        <button id="startBtn">Start meting</button>
+        <button id="stopBtn">Stop meting</button>
+        <button id="helpBtn">Herkenningshulp</button>
+    </div>
+
+    <div class="status" id="status">Verbinden...</div>
+
+    <div class="verdict-panel neutral" id="verdictPanel">
+        <div class="verdict-header">
+            <div class="verdict-badge" id="verdictBadge">--</div>
+            <div class="verdict-text">
+                <div class="verdict-title" id="verdictTitle">Nog geen meting</div>
+                <div class="verdict-summary" id="verdictSummary">Start een meting om analyse te zien.</div>
+            </div>
+        </div>
+        <div class="verdict-action" id="verdictAction">--</div>
+        <div class="verdict-details" id="verdictDetails"></div>
+    </div>
+
+    <div class="cards">
+        <div class="card">
+            <div class="card-label">RF Health</div>
+            <div class="card-value" id="healthScore">--</div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Noise Floor</div>
+            <div class="card-value" id="noiseFloor">--</div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Peak</div>
+            <div class="card-value" id="peakInfo">--</div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Peak SNR</div>
+            <div class="card-value" id="peakSnr">--</div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Actieve zone</div>
+            <div class="card-value" id="activeZone">--</div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Interferentie</div>
+            <div class="card-value small" id="interferenceInfo">--</div>
+        </div>
+
+        <div class="card">
+            <div class="card-label">Beste kanaal</div>
+            <div class="card-value" id="bestChannel">--</div>
+        </div>
+    </div>
+
+    <div class="channel-strip">
+        <div class="channel-box">
+            <div class="channel-title">CH 1</div>
+            <div class="channel-value" id="ch1">--</div>
+            <div class="channel-sub" id="snr1avg">Avg SNR --</div>
+            <div class="channel-sub" id="snr1peak">Peak SNR --</div>
+        </div>
+        <div class="channel-box">
+            <div class="channel-title">CH 6</div>
+            <div class="channel-value" id="ch6">--</div>
+            <div class="channel-sub" id="snr6avg">Avg SNR --</div>
+            <div class="channel-sub" id="snr6peak">Peak SNR --</div>
+        </div>
+        <div class="channel-box">
+            <div class="channel-title">CH 11</div>
+            <div class="channel-value" id="ch11">--</div>
+            <div class="channel-sub" id="snr11avg">Avg SNR --</div>
+            <div class="channel-sub" id="snr11peak">Peak SNR --</div>
+        </div>
+    </div>
+
+    <div class="canvas-wrap">
+        <canvas id="waterfall" width="900" height="500"></canvas>
+    </div>
+
+    <div class="axis">
+        <span>2400 MHz</span>
+        <span>2447 MHz</span>
+        <span>2495 MHz</span>
+    </div>
+
+    <div class="modal-backdrop hidden" id="helpModal">
+        <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+            <div class="modal-header">
+                <div>
+                    <h2 id="helpTitle">Herkenningshulp</h2>
+                    <div class="modal-subtitle">Praktische gids voor 2.4 GHz interpretatie</div>
+                </div>
+                <button class="modal-close" id="closeHelpBtn" aria-label="Sluiten">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <section class="help-section">
+                    <h3>1. Noise Floor</h3>
+                    <p>De noise floor is de basisruis in het spectrum. Dit is niet hetzelfde als SNR.</p>
+                    <div class="help-table">
+                        <div><strong>≤ -100 dBm</strong> → zeer goed</div>
+                        <div><strong>-100 tot -95 dBm</strong> → goed</div>
+                        <div><strong>-95 tot -90 dBm</strong> → druk</div>
+                        <div><strong>&gt; -90 dBm</strong> → slecht</div>
+                    </div>
+                </section>
+
+                <section class="help-section">
+                    <h3>2. SNR correct interpreteren</h3>
+                    <p>SNR is het verschil tussen signaal en noise floor.</p>
+                    <div class="help-code">SNR = signaal - noise floor</div>
+                    <p><strong>Avg SNR</strong> gebruikt het gemiddelde kanaalniveau en is het belangrijkst voor kanaalkwaliteit.</p>
+                    <p><strong>Peak SNR</strong> gebruikt de sterkste piek en toont hoe sterk het beste signaal binnen dat kanaal is.</p>
+                    <div class="help-table">
+                        <div><strong>&gt; 35 dB</strong> → uitstekend</div>
+                        <div><strong>25–35 dB</strong> → goed</div>
+                        <div><strong>15–25 dB</strong> → matig</div>
+                        <div><strong>&lt; 15 dB</strong> → slecht</div>
+                    </div>
+                </section>
+
+                <section class="help-section">
+                    <h3>3. Patroonherkenning</h3>
+                    <ul class="help-list">
+                        <li><strong>WiFi:</strong> brede blokken of banden, meestal rond kanaal 1 / 6 / 11</li>
+                        <li><strong>Bluetooth / kleine devices:</strong> veel kleine springende puntjes</li>
+                        <li><strong>Wireless headset / dongle:</strong> veel kleine maar sterkere bursts over brede zone</li>
+                        <li><strong>Brede ruisbron:</strong> vuile waas, hogere basisruis, minder structuur</li>
+                        <li><strong>Zware stoorder:</strong> brute brede activiteit over een groot deel van de band</li>
+                    </ul>
+                </section>
+
+                <section class="help-section">
+                    <h3>4. Testmethode in het veld</h3>
+                    <ol class="help-list ordered">
+                        <li>Meet zonder toestel</li>
+                        <li>Zet toestel aan</li>
+                        <li>Gebruik toestel actief</li>
+                        <li>Meet opnieuw</li>
+                        <li>Zet toestel uit</li>
+                        <li>Meet opnieuw</li>
+                    </ol>
+                    <p>Als het patroon verschijnt en verdwijnt samen met het toestel, is dat sterke praktische indicatie.</p>
+                </section>
+
+                <section class="help-section">
+                    <h3>5. Buffering diagnose</h3>
+                    <ul class="help-list">
+                        <li><strong>Waarschijnlijk geen RF-probleem:</strong> lage noise floor, hoge avg SNR, weinig interferentie</li>
+                        <li><strong>Mogelijk WiFi-probleem:</strong> matige avg SNR, druk kanaal, overlap zichtbaar</li>
+                        <li><strong>Waarschijnlijk WiFi-probleem:</strong> lage avg SNR, hoge noise floor, interferentie zichtbaar</li>
+                    </ul>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

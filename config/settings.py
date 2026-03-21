@@ -1,0 +1,12 @@
+MAX_ROWS = 120
+FREQ_START = 2400
+FREQ_END = 2495
+SPECTOOL_PATH = "/home/jproost/spectools/spectool_raw"
+
+DBM_MIN = -110
+DBM_MAX = -30
+
+POLL_INTERVAL_MS = 250
+
+HOST = "0.0.0.0"
+PORT = 5000
