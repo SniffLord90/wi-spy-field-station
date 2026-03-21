@@ -37,6 +37,14 @@ const snr1PeakEl = document.getElementById("snr1peak");
 const snr6PeakEl = document.getElementById("snr6peak");
 const snr11PeakEl = document.getElementById("snr11peak");
 
+const label1El = document.getElementById("label1");
+const label6El = document.getElementById("label6");
+const label11El = document.getElementById("label11");
+
+const score1El = document.getElementById("score1");
+const score6El = document.getElementById("score6");
+const score11El = document.getElementById("score11");
+
 function colorMap(dbm) {
     if (dbm < -110) dbm = -110;
     if (dbm > -30) dbm = -30;
@@ -106,20 +114,62 @@ function drawWaterfall(rows) {
 }
 
 function updateButtons(running) {
-    startBtn.disabled = running;
+    startBtn.disabled = !!running;
     stopBtn.disabled = !running;
 }
 
-function scoreClass(score) {
-    if (score >= 80) return "good";
-    if (score >= 55) return "warn";
+function valueOrDash(value, suffix = "") {
+    if (value === null || value === undefined || value === "") {
+        return "--";
+    }
+    return `${value}${suffix}`;
+}
+
+function numberClassFromScore(score) {
+    if (score === null || score === undefined || Number.isNaN(score)) return "neutral";
+    if (score >= 70) return "good";
+    if (score >= 45) return "warn";
     return "bad";
 }
 
 function snrClass(snr) {
+    if (snr === null || snr === undefined || Number.isNaN(snr)) return "neutral";
     if (snr >= 35) return "good";
     if (snr >= 25) return "warn";
     return "bad";
+}
+
+function mapFieldStatusClass(fieldStatus) {
+    switch (fieldStatus) {
+        case "good":
+        case "ok":
+            return "good";
+        case "degraded":
+            return "warn";
+        case "bad":
+        case "critical":
+            return "bad";
+        default:
+            return "neutral";
+    }
+}
+
+function formatRunningText(running, lastUpdateTime) {
+    if (!running) {
+        return "gestopt";
+    }
+
+    if (!lastUpdateTime) {
+        return "startend...";
+    }
+
+    const age = (Date.now() / 1000) - lastUpdateTime;
+
+    if (age < 2) {
+        return "live";
+    }
+
+    return `laatste update ${age.toFixed(1)}s geleden`;
 }
 
 function setFieldDefaults() {
@@ -129,6 +179,7 @@ function setFieldDefaults() {
     noiseFloorEl.textContent = "--";
     peakInfoEl.textContent = "--";
     peakSnrEl.textContent = "--";
+    peakSnrEl.className = "card-value neutral";
     activeZoneEl.textContent = "--";
     interferenceInfoEl.textContent = "--";
     bestChannelEl.textContent = "--";
@@ -145,6 +196,14 @@ function setFieldDefaults() {
     snr6PeakEl.textContent = "Peak SNR --";
     snr11PeakEl.textContent = "Peak SNR --";
 
+    label1El.textContent = "Kwaliteit --";
+    label6El.textContent = "Kwaliteit --";
+    label11El.textContent = "Kwaliteit --";
+
+    score1El.textContent = "Score --";
+    score6El.textContent = "Score --";
+    score11El.textContent = "Score --";
+
     ch1El.className = "channel-value neutral";
     ch6El.className = "channel-value neutral";
     ch11El.className = "channel-value neutral";
@@ -157,6 +216,14 @@ function setFieldDefaults() {
     snr6PeakEl.className = "channel-sub neutral";
     snr11PeakEl.className = "channel-sub neutral";
 
+    label1El.className = "channel-sub neutral";
+    label6El.className = "channel-sub neutral";
+    label11El.className = "channel-sub neutral";
+
+    score1El.className = "channel-sub neutral";
+    score6El.className = "channel-sub neutral";
+    score11El.className = "channel-sub neutral";
+
     verdictPanelEl.className = "verdict-panel neutral";
     verdictBadgeEl.textContent = "--";
     verdictTitleEl.textContent = "Nog geen meting";
@@ -165,7 +232,7 @@ function setFieldDefaults() {
     verdictDetailsEl.innerHTML = "";
 }
 
-function renderVerdict(verdict) {
+function renderVerdict(verdict, analysis) {
     if (!verdict) {
         verdictPanelEl.className = "verdict-panel neutral";
         verdictBadgeEl.textContent = "--";
@@ -176,72 +243,118 @@ function renderVerdict(verdict) {
         return;
     }
 
-    verdictPanelEl.className = `verdict-panel ${verdict.severity}`;
-    verdictBadgeEl.textContent = verdict.severity.toUpperCase();
-    verdictTitleEl.textContent = verdict.title;
-    verdictSummaryEl.textContent = verdict.summary;
-    verdictActionEl.textContent = verdict.action || "--";
+    const severityClass = mapFieldStatusClass(verdict.field_status);
+    verdictPanelEl.className = `verdict-panel ${severityClass}`;
+    verdictBadgeEl.textContent = (verdict.field_status || "--").toUpperCase();
+    verdictTitleEl.textContent = verdict.summary || "Analyse beschikbaar";
+    verdictSummaryEl.textContent = analysis?.summary || verdict.recommended_text || "Analyse beschikbaar";
+    verdictActionEl.textContent = verdict.action || analysis?.action || "--";
 
     verdictDetailsEl.innerHTML = "";
-    (verdict.details || []).forEach((item) => {
+
+    const details = [];
+
+    if (verdict.classification) {
+        details.push(`Classificatie: ${verdict.classification}`);
+    }
+
+    if (verdict.confidence !== null && verdict.confidence !== undefined) {
+        details.push(`Confidence: ${Math.round(verdict.confidence * 100)}%`);
+    }
+
+    if (verdict.non_overlapping_text) {
+        details.push(verdict.non_overlapping_text);
+    }
+
+    details.forEach((item) => {
         const row = document.createElement("div");
         row.textContent = `• ${item}`;
         verdictDetailsEl.appendChild(row);
     });
 }
 
+function qualityClassFromLabel(label) {
+    if (!label) return "neutral";
+    const value = String(label).toLowerCase();
+
+    if (value === "goed") return "good";
+    if (value === "matig") return "warn";
+    if (value === "slecht") return "bad";
+
+    return "neutral";
+}
+
+function paintChannel(el, avgEl, peakEl, labelEl, scoreEl, chData, bestChannel, chNumber) {
+    if (!chData) {
+        el.textContent = "--";
+        avgEl.textContent = "Avg SNR --";
+        peakEl.textContent = "Peak SNR --";
+        labelEl.textContent = "Kwaliteit --";
+        scoreEl.textContent = "Score --";
+
+        el.className = "channel-value neutral";
+        avgEl.className = "channel-sub neutral";
+        peakEl.className = "channel-sub neutral";
+        labelEl.className = "channel-sub neutral";
+        scoreEl.className = "channel-sub neutral";
+        return;
+    }
+
+    el.textContent = valueOrDash(chData.mean_dbm, " dBm");
+    avgEl.textContent = `Avg SNR ${valueOrDash(chData.avg_snr, " dB")}`;
+    peakEl.textContent = `Peak SNR ${valueOrDash(chData.peak_snr, " dB")}`;
+    labelEl.textContent = `Kwaliteit ${chData.label || "--"}`;
+    scoreEl.textContent = `Score ${valueOrDash(chData.score)}`;
+
+    let mainClass = "neutral";
+
+    if (String(bestChannel) === String(chNumber)) {
+        mainClass = "good";
+    } else if (chData.score !== null && chData.score !== undefined) {
+        mainClass = numberClassFromScore(chData.score);
+    }
+
+    el.className = `channel-value ${mainClass}`;
+    avgEl.className = `channel-sub ${snrClass(chData.avg_snr)}`;
+    peakEl.className = `channel-sub ${snrClass(chData.peak_snr)}`;
+    labelEl.className = `channel-sub ${qualityClassFromLabel(chData.label)}`;
+    scoreEl.className = `channel-sub ${numberClassFromScore(chData.score)}`;
+}
+
 function renderAnalysis(analysis) {
-    if (!analysis) {
+    if (!analysis || Object.keys(analysis).length === 0) {
         setFieldDefaults();
         return;
     }
 
-    const score = analysis.health_score;
-    healthScoreEl.textContent = `${score}/100`;
-    healthScoreEl.className = `card-value ${scoreClass(score)}`;
+    healthScoreEl.textContent = analysis.rf_health || "--";
+    healthScoreEl.className = `card-value ${mapFieldStatusClass(analysis?.verdict?.field_status)}`;
 
-    noiseFloorEl.textContent = `${analysis.noise_floor_dbm} dBm`;
-    peakInfoEl.textContent = `${analysis.peak_dbm} dBm @ ${analysis.peak_freq_mhz} MHz`;
-    peakSnrEl.textContent = `${analysis.global_peak_snr_db} dB`;
-    peakSnrEl.className = `card-value ${snrClass(analysis.global_peak_snr_db)}`;
-    activeZoneEl.textContent = `${analysis.active_zone.start_mhz} - ${analysis.active_zone.end_mhz} MHz`;
-    interferenceInfoEl.textContent = analysis.interference.message;
-    bestChannelEl.textContent = `Kanaal ${analysis.best_channel}`;
+    noiseFloorEl.textContent = valueOrDash(analysis.noise_floor, " dBm");
 
-    const channels = analysis.channels || {};
-
-    function paintChannel(el, avgEl, peakEl, chData, bestChannel, chNumber) {
-        if (!chData) {
-            el.textContent = "--";
-            avgEl.textContent = "Avg SNR --";
-            peakEl.textContent = "Peak SNR --";
-            el.className = "channel-value neutral";
-            avgEl.className = "channel-sub neutral";
-            peakEl.className = "channel-sub neutral";
-            return;
-        }
-
-        el.textContent = `${chData.mean_dbm} dBm`;
-        avgEl.textContent = `Avg SNR ${chData.snr_avg_db} dB`;
-        peakEl.textContent = `Peak SNR ${chData.snr_peak_db} dB`;
-
-        if (bestChannel === chNumber) {
-            el.className = "channel-value good";
-        } else if (chData.mean_dbm > -85) {
-            el.className = "channel-value bad";
-        } else {
-            el.className = "channel-value warn";
-        }
-
-        avgEl.className = `channel-sub ${snrClass(chData.snr_avg_db)}`;
-        peakEl.className = `channel-sub ${snrClass(chData.snr_peak_db)}`;
+    if (analysis.peak !== null && analysis.peak !== undefined && analysis.peak_freq_mhz !== null && analysis.peak_freq_mhz !== undefined) {
+        peakInfoEl.textContent = `${analysis.peak} dBm @ ${analysis.peak_freq_mhz} MHz`;
+    } else {
+        peakInfoEl.textContent = valueOrDash(analysis.peak, " dBm");
     }
 
-    paintChannel(ch1El, snr1AvgEl, snr1PeakEl, channels["1"], analysis.best_channel, "1");
-    paintChannel(ch6El, snr6AvgEl, snr6PeakEl, channels["6"], analysis.best_channel, "6");
-    paintChannel(ch11El, snr11AvgEl, snr11PeakEl, channels["11"], analysis.best_channel, "11");
+    peakSnrEl.textContent = valueOrDash(analysis.peak_snr, " dB");
+    peakSnrEl.className = `card-value ${snrClass(analysis.peak_snr)}`;
 
-    renderVerdict(analysis.verdict);
+    activeZoneEl.textContent = analysis.active_zone || "--";
+    interferenceInfoEl.textContent = analysis.interference_label || "--";
+
+    if (analysis.best_channel !== null && analysis.best_channel !== undefined) {
+        bestChannelEl.textContent = `Kanaal ${analysis.best_channel}`;
+    } else {
+        bestChannelEl.textContent = "--";
+    }
+
+    paintChannel(ch1El, snr1AvgEl, snr1PeakEl, label1El, score1El, analysis.ch1, analysis.best_channel, 1);
+    paintChannel(ch6El, snr6AvgEl, snr6PeakEl, label6El, score6El, analysis.ch6, analysis.best_channel, 6);
+    paintChannel(ch11El, snr11AvgEl, snr11PeakEl, label11El, score11El, analysis.ch11, analysis.best_channel, 11);
+
+    renderVerdict(analysis.verdict, analysis);
 }
 
 function openHelp() {
@@ -266,38 +379,25 @@ async function poll() {
         }
 
         const data = await res.json();
+        const status = data.status || {};
+        const running = !!status.running;
 
         if (data.waterfall && data.waterfall.length > 0) {
             drawWaterfall(data.waterfall);
-        } else if (!data.running) {
+        } else if (!running) {
             clearWaterfall();
         }
 
         renderAnalysis(data.analysis);
-        updateButtons(data.running);
+        updateButtons(running);
 
-        const age = data.last_update_time
-            ? (Date.now() / 1000) - data.last_update_time
-            : null;
-
-        let ageText = "gestopt";
-        if (data.running) {
-            ageText = age !== null && age < 2
-                ? "live"
-                : `laatste update ${age.toFixed(1)}s geleden`;
-        }
-
-        let extra = "";
-        if (data.last_error) {
-            extra += ` | Fout: ${data.last_error}`;
-        }
-
-        if (typeof data.sweeps_received !== "undefined" && typeof data.rows_committed !== "undefined") {
-            extra += ` | Sweeps: ${data.sweeps_received} | Rows: ${data.rows_committed}`;
-        }
+        const rowsVisible = Array.isArray(data.waterfall) ? data.waterfall.length : 0;
+        const samples = Array.isArray(data.latest_sweep) ? data.latest_sweep.length : 0;
+        const ageText = formatRunningText(running, status.last_update_time);
 
         statusEl.textContent =
-            `Rows zichtbaar: ${data.rows} | Samples: ${data.samples} | Status: ${ageText}${extra}`;
+            `Rows zichtbaar: ${rowsVisible} | Samples: ${samples} | Status: ${ageText} | Committed: ${status.rows_committed ?? 0}`;
+
     } catch (err) {
         statusEl.textContent = "Verbinding mislukt, opnieuw proberen...";
         updateButtons(false);
@@ -306,13 +406,19 @@ async function poll() {
 }
 
 startBtn.addEventListener("click", async () => {
-    await fetch("/start", { method: "POST" });
-    setTimeout(poll, 200);
+    try {
+        await fetch("/start", { method: "POST" });
+    } catch (err) {
+    }
+    setTimeout(poll, 300);
 });
 
 stopBtn.addEventListener("click", async () => {
-    await fetch("/stop", { method: "POST" });
-    setTimeout(poll, 200);
+    try {
+        await fetch("/stop", { method: "POST" });
+    } catch (err) {
+    }
+    setTimeout(poll, 300);
 });
 
 helpBtn.addEventListener("click", openHelp);
@@ -332,4 +438,4 @@ document.addEventListener("keydown", (event) => {
 
 setFieldDefaults();
 poll();
-setInterval(poll, 250);
+setInterval(poll, 500);
