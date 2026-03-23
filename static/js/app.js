@@ -73,6 +73,11 @@ let followLive = true;
 let viewportStart = 0;
 let isDraggingMinimap = false;
 
+let waterfallBufferCanvas = null;
+let waterfallBufferCtx = null;
+let minimapBufferCanvas = null;
+let minimapBufferCtx = null;
+
 const traceState = {
     live: true,
     avg: true,
@@ -200,18 +205,49 @@ function colorMap(dbm) {
         b = Math.round(20 + 180 * x);
     }
 
-    return `rgb(${r}, ${g}, ${b})`;
+    return [r, g, b];
 }
 
 function clearWaterfall() {
     waterfallCtx.clearRect(0, 0, waterfallCanvas.width, waterfallCanvas.height);
 }
 
-function drawRowsToCanvas(ctx, canvas, rows) {
-    const h = canvas.height;
-    const w = canvas.width;
+function ensureBufferCanvas(targetWidth, targetHeight, type = "waterfall") {
+    if (type === "waterfall") {
+        if (
+            !waterfallBufferCanvas ||
+            waterfallBufferCanvas.width !== targetWidth ||
+            waterfallBufferCanvas.height !== targetHeight
+        ) {
+            waterfallBufferCanvas = document.createElement("canvas");
+            waterfallBufferCanvas.width = targetWidth;
+            waterfallBufferCanvas.height = targetHeight;
+            waterfallBufferCtx = waterfallBufferCanvas.getContext("2d", { alpha: false });
+            waterfallBufferCtx.imageSmoothingEnabled = false;
+        }
+        return { canvas: waterfallBufferCanvas, ctx: waterfallBufferCtx };
+    }
 
-    ctx.clearRect(0, 0, w, h);
+    if (
+        !minimapBufferCanvas ||
+        minimapBufferCanvas.width !== targetWidth ||
+        minimapBufferCanvas.height !== targetHeight
+    ) {
+        minimapBufferCanvas = document.createElement("canvas");
+        minimapBufferCanvas.width = targetWidth;
+        minimapBufferCanvas.height = targetHeight;
+        minimapBufferCtx = minimapBufferCanvas.getContext("2d", { alpha: false });
+        minimapBufferCtx.imageSmoothingEnabled = false;
+    }
+
+    return { canvas: minimapBufferCanvas, ctx: minimapBufferCtx };
+}
+
+function drawRowsPixelStable(targetCtx, targetCanvas, rows, bufferType = "waterfall") {
+    const w = targetCanvas.width;
+    const h = targetCanvas.height;
+
+    targetCtx.clearRect(0, 0, w, h);
 
     if (!rows || rows.length === 0) {
         return;
@@ -220,22 +256,34 @@ function drawRowsToCanvas(ctx, canvas, rows) {
     const rowCount = rows.length;
     const colCount = rows[0].length;
 
-    const rowHeight = h / rowCount;
-    const colWidth = w / colCount;
+    const { canvas: bufferCanvas, ctx: bufferCtx } = ensureBufferCanvas(colCount, rowCount, bufferType);
+
+    const imageData = bufferCtx.createImageData(colCount, rowCount);
+    const pixels = imageData.data;
 
     for (let y = 0; y < rowCount; y++) {
-        const row = rows[rowCount - 1 - y];
+        const row = rows[y];
 
         for (let x = 0; x < colCount; x++) {
-            ctx.fillStyle = colorMap(row[x]);
-            ctx.fillRect(
-                x * colWidth,
-                h - (y + 1) * rowHeight,
-                Math.ceil(colWidth),
-                Math.ceil(rowHeight)
-            );
+            const [r, g, b] = colorMap(row[x]);
+            const idx = (y * colCount + x) * 4;
+            pixels[idx] = r;
+            pixels[idx + 1] = g;
+            pixels[idx + 2] = b;
+            pixels[idx + 3] = 255;
         }
     }
+
+    bufferCtx.putImageData(imageData, 0, 0);
+
+    targetCtx.save();
+    targetCtx.imageSmoothingEnabled = false;
+    targetCtx.drawImage(bufferCanvas, 0, 0, w, h);
+    targetCtx.restore();
+}
+
+function drawRowsToCanvas(ctx, canvas, rows, bufferType = "waterfall") {
+    drawRowsPixelStable(ctx, canvas, rows, bufferType);
 }
 
 function getViewportRows() {
@@ -255,7 +303,7 @@ function getViewportRows() {
 
 function drawWaterfallViewport() {
     const rows = getViewportRows();
-    drawRowsToCanvas(waterfallCtx, waterfallCanvas, rows);
+    drawRowsToCanvas(waterfallCtx, waterfallCanvas, rows, "waterfall");
 }
 
 function drawMinimap() {
@@ -265,7 +313,7 @@ function drawMinimap() {
         return;
     }
 
-    drawRowsToCanvas(minimapCtx, minimapCanvas, sessionRows);
+    drawRowsToCanvas(minimapCtx, minimapCanvas, sessionRows, "minimap");
 
     const totalRows = sessionRows.length;
     const visibleRows = Math.min(VIEW_ROWS, totalRows);
@@ -274,12 +322,14 @@ function drawMinimap() {
     const y = (start / totalRows) * minimapCanvas.height;
     const h = Math.max(8, (visibleRows / totalRows) * minimapCanvas.height);
 
+    minimapCtx.save();
     minimapCtx.strokeStyle = "rgba(255,255,255,0.95)";
     minimapCtx.lineWidth = 2;
     minimapCtx.strokeRect(1, y, minimapCanvas.width - 2, h);
 
     minimapCtx.fillStyle = "rgba(255,255,255,0.10)";
     minimapCtx.fillRect(1, y, minimapCanvas.width - 2, h);
+    minimapCtx.restore();
 }
 
 function setViewportFromMinimapY(y) {
@@ -287,7 +337,13 @@ function setViewportFromMinimapY(y) {
 
     const ratio = y / minimapCanvas.height;
     const targetRow = Math.floor(ratio * sessionRows.length);
-    viewportStart = Math.max(0, Math.min(targetRow - Math.floor(VIEW_ROWS / 2), Math.max(0, sessionRows.length - VIEW_ROWS)));
+    viewportStart = Math.max(
+        0,
+        Math.min(
+            targetRow - Math.floor(VIEW_ROWS / 2),
+            Math.max(0, sessionRows.length - VIEW_ROWS)
+        )
+    );
     followLive = false;
     drawWaterfallViewport();
     drawMinimap();
@@ -785,7 +841,10 @@ function bindMinimap() {
             viewportStart -= step;
         }
 
-        viewportStart = Math.max(0, Math.min(viewportStart, Math.max(0, sessionRows.length - VIEW_ROWS)));
+        viewportStart = Math.max(
+            0,
+            Math.min(viewportStart, Math.max(0, sessionRows.length - VIEW_ROWS))
+        );
         drawWaterfallViewport();
         drawMinimap();
     }, { passive: false });
@@ -847,4 +906,4 @@ setFieldDefaults();
 clearSpectrum();
 clearWaterfall();
 poll();
-setInterval(poll, 500);
+setInterval(poll, 250);
