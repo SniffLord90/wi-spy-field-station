@@ -10,6 +10,9 @@
     --warn: #ffb84d;
     --bad: #ff6b6b;
     --neutral: #8a93a3;
+    --live: #4ac2ff;
+    --avg: #ffd74b;
+    --hold: #ff5656;
 }
 
 * {
@@ -22,7 +25,7 @@ body {
     background: var(--bg);
     color: var(--text);
     font-family: Arial, Helvetica, sans-serif;
-    max-width: 1100px;
+    max-width: 1200px;
     margin-inline: auto;
 }
 
@@ -214,6 +217,154 @@ button:disabled {
     color: var(--neutral);
 }
 
+.plot-wrap {
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, #08111a 0%, #02050a 100%);
+    padding: 10px 12px 12px;
+    border-radius: 18px 18px 0 0;
+    overflow: hidden;
+    margin-bottom: 0;
+    box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.04),
+        0 12px 24px rgba(0,0,0,0.18);
+}
+
+.plot-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.plot-title-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.plot-title {
+    font-weight: 800;
+    font-size: 1.15rem;
+    color: #eef5ff;
+}
+
+.plot-subtitle {
+    color: #93a4c0;
+    font-size: 0.9rem;
+}
+
+.trace-toggles {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.trace-toggle {
+    background: rgba(255,255,255,0.04);
+    color: #c8d8f0;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 999px;
+    padding: 8px 14px;
+    font-size: 0.92rem;
+    transition: all 0.15s ease;
+}
+
+.trace-toggle:hover {
+    background: rgba(255,255,255,0.08);
+}
+
+.trace-toggle.active.live {
+    color: #061019;
+    background: var(--live);
+    border-color: var(--live);
+    box-shadow: 0 0 18px rgba(74, 194, 255, 0.22);
+}
+
+.trace-toggle.active.avg {
+    color: #231900;
+    background: var(--avg);
+    border-color: var(--avg);
+    box-shadow: 0 0 18px rgba(255, 215, 75, 0.18);
+}
+
+.trace-toggle.active.hold {
+    color: #2b0505;
+    background: var(--hold);
+    border-color: var(--hold);
+    box-shadow: 0 0 18px rgba(255, 86, 86, 0.18);
+}
+
+.trace-toggle.active.neutral {
+    color: #dce8ff;
+    background: rgba(255,255,255,0.08);
+    border-color: rgba(255,255,255,0.18);
+}
+
+.waterfall-layout {
+    display: grid;
+    grid-template-columns: 1fr 140px;
+    gap: 14px;
+    align-items: start;
+    margin-bottom: 16px;
+}
+
+.waterfall-main {
+    min-width: 0;
+}
+
+.waterfall-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    gap: 12px;
+}
+
+.waterfall-title {
+    font-weight: 700;
+    color: #dfe7f7;
+}
+
+.waterfall-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.minimap-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px;
+}
+
+.minimap-title {
+    font-size: 0.9rem;
+    color: #dfe7f7;
+    margin-bottom: 8px;
+    text-align: center;
+    font-weight: 700;
+}
+
+.minimap-help {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-align: center;
+    line-height: 1.3;
+}
+
+#minimapCanvas {
+    width: 100%;
+    height: auto;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    background: #000;
+}
+
 .canvas-wrap {
     border: 1px solid var(--border);
     background: #000;
@@ -236,6 +387,11 @@ canvas {
     font-size: 0.95rem;
     margin-top: 8px;
     margin-bottom: 10px;
+}
+
+.spectrum-axis {
+    margin-top: 6px;
+    margin-bottom: 18px;
 }
 
 .channel-map {
@@ -360,10 +516,18 @@ canvas {
     list-style: decimal;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
     .cards,
     .channel-strip {
         grid-template-columns: 1fr;
+    }
+
+    .waterfall-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .minimap-panel {
+        order: -1;
     }
 
     h1 {
@@ -372,5 +536,10 @@ canvas {
 
     .channel-band {
         font-size: 0.68rem;
+    }
+
+    .plot-toolbar {
+        flex-direction: column;
+        align-items: stretch;
     }
 }

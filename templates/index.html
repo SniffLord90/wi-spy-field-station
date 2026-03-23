@@ -95,14 +95,55 @@
         </div>
     </div>
 
-    <div class="canvas-wrap">
-        <canvas id="waterfall" width="900" height="500"></canvas>
+    <div class="plot-wrap">
+        <div class="plot-toolbar">
+            <div class="plot-title-wrap">
+                <div class="plot-title">Live Spectrum Trace</div>
+                <div class="plot-subtitle">2.4 GHz realtime spectrum view</div>
+            </div>
+
+            <div class="trace-toggles">
+                <button class="trace-toggle live active" id="toggleLive" type="button">Live</button>
+                <button class="trace-toggle avg active" id="toggleAvg" type="button">Average</button>
+                <button class="trace-toggle hold active" id="toggleHold" type="button">Max Hold</button>
+                <button class="trace-toggle neutral active" id="resetMaxHoldBtn" type="button">Reset Max Hold</button>
+            </div>
+        </div>
+
+        <canvas id="spectrumCanvas" width="900" height="260"></canvas>
     </div>
 
-    <div class="axis">
+    <div class="axis spectrum-axis">
         <span>2400 MHz</span>
         <span>2447 MHz</span>
         <span>2495 MHz</span>
+    </div>
+
+    <div class="waterfall-layout">
+        <div class="waterfall-main">
+            <div class="waterfall-toolbar">
+                <div class="waterfall-title">Waterfall History</div>
+                <div class="waterfall-actions">
+                    <button id="followLiveBtn" type="button">Terug naar live</button>
+                </div>
+            </div>
+
+            <div class="canvas-wrap">
+                <canvas id="waterfall" width="900" height="500"></canvas>
+            </div>
+
+            <div class="axis">
+                <span>2400 MHz</span>
+                <span>2447 MHz</span>
+                <span>2495 MHz</span>
+            </div>
+        </div>
+
+        <div class="minimap-panel">
+            <div class="minimap-title">Sessieminiatuur</div>
+            <canvas id="minimapCanvas" width="120" height="500"></canvas>
+            <div class="minimap-help">Klik of sleep om door de sessie te scrollen</div>
+        </div>
     </div>
 
     <div class="channel-map" id="channelMap">

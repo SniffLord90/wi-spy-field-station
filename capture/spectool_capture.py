@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -12,8 +15,10 @@ import numpy as np
 from config.settings import (
     FREQ_START,
     FREQ_END,
+    LOG_DIR,
     LONG_WINDOW_SECONDS,
     MAX_ROWS,
+    NARROW_MAX_WIDTH_MHZ,
     PERSISTENCE_MEDIUM_RATIO,
     POLL_INTERVAL_MS,
     SHORT_WINDOW_SECONDS,
@@ -26,7 +31,6 @@ from config.settings import (
     WEIGHT_NOISE,
     WEIGHT_OVERLAP,
     WEIGHT_PEAK,
-    NARROW_MAX_WIDTH_MHZ,
     WIDEBAND_MIN_WIDTH_MHZ,
 )
 
@@ -59,6 +63,15 @@ class SpectoolManager:
         self.freq_end = float(FREQ_END)
         self._bin_freqs_cache: np.ndarray | None = None
 
+        self.log_root = Path(LOG_DIR)
+        self.log_root.mkdir(parents=True, exist_ok=True)
+
+        self.session_id: str | None = None
+        self.session_dir: Path | None = None
+        self.session_start_ts: float | None = None
+        self.session_file = None
+        self.session_rows_logged = 0
+
     # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
@@ -67,6 +80,8 @@ class SpectoolManager:
         with self.lock:
             if self.running:
                 return {"ok": True, "message": "Capture already running"}
+
+            self._start_session_logging()
 
             self.running = True
             self.capture_thread = threading.Thread(
@@ -85,6 +100,9 @@ class SpectoolManager:
 
         if self.capture_thread and self.capture_thread.is_alive():
             self.capture_thread.join(timeout=2.0)
+
+        with self.lock:
+            self._stop_session_logging()
 
         return {"ok": True, "message": "Capture stopped"}
 
@@ -106,6 +124,9 @@ class SpectoolManager:
                 "expected_bins": self.expected_bins,
                 "waterfall_rows": len(self.waterfall),
                 "history_rows": len(self.history),
+                "session_id": self.session_id,
+                "session_rows_logged": self.session_rows_logged,
+                "session_dir": str(self.session_dir) if self.session_dir else None,
             }
 
     def get_latest_data(self) -> dict[str, Any]:
@@ -117,6 +138,9 @@ class SpectoolManager:
                 "expected_bins": self.expected_bins,
                 "waterfall_rows": len(self.waterfall),
                 "history_rows": len(self.history),
+                "session_id": self.session_id,
+                "session_rows_logged": self.session_rows_logged,
+                "session_dir": str(self.session_dir) if self.session_dir else None,
             }
 
             return {
@@ -128,6 +152,87 @@ class SpectoolManager:
 
     def get_data(self) -> dict[str, Any]:
         return self.get_latest_data()
+
+    # -------------------------------------------------------------------------
+    # Session logging
+    # -------------------------------------------------------------------------
+
+    def _start_session_logging(self) -> None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_id = ts
+        self.session_dir = self.log_root / ts
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.session_start_ts = time.time()
+        self.session_rows_logged = 0
+
+        metadata = {
+            "session_id": self.session_id,
+            "created_at": datetime.now().isoformat(),
+            "freq_start_mhz": self.freq_start,
+            "freq_end_mhz": self.freq_end,
+            "spectool_path": SPECTOOL_PATH,
+        }
+
+        metadata_path = self.session_dir / "metadata.json"
+        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        self.session_file = open(self.session_dir / "sweeps.jsonl", "a", encoding="utf-8")
+
+    def _stop_session_logging(self) -> None:
+        if self.session_file:
+            try:
+                self.session_file.flush()
+                self.session_file.close()
+            except Exception:
+                pass
+            self.session_file = None
+
+        if self.session_dir:
+            summary = {
+                "session_id": self.session_id,
+                "ended_at": datetime.now().isoformat(),
+                "rows_logged": self.session_rows_logged,
+                "rows_committed_total": self.rows_committed,
+                "duration_seconds": (
+                    round(time.time() - self.session_start_ts, 2)
+                    if self.session_start_ts else None
+                ),
+            }
+            try:
+                (self.session_dir / "summary.json").write_text(
+                    json.dumps(summary, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+
+    def _log_sweep(self, ts: float, sweep: list[int], analysis: dict[str, Any]) -> None:
+        if not self.session_file:
+            return
+
+        row = {
+            "timestamp": ts,
+            "sweep": sweep,
+            "analysis": {
+                "rf_health": analysis.get("rf_health"),
+                "noise_floor": analysis.get("noise_floor"),
+                "peak": analysis.get("peak"),
+                "peak_freq_mhz": analysis.get("peak_freq_mhz"),
+                "peak_snr": analysis.get("peak_snr"),
+                "active_zone": analysis.get("active_zone"),
+                "interference_label": analysis.get("interference_label"),
+                "best_channel": analysis.get("best_channel"),
+                "summary": analysis.get("summary"),
+                "action": analysis.get("action"),
+            },
+        }
+
+        try:
+            self.session_file.write(json.dumps(row) + "\n")
+            self.session_file.flush()
+            self.session_rows_logged += 1
+        except Exception:
+            pass
 
     # -------------------------------------------------------------------------
     # Spectool process handling
@@ -170,10 +275,7 @@ class SpectoolManager:
 
     def _parse_sweep_line(self, line: str) -> list[int]:
         line = line.strip()
-        if not line:
-            return []
-
-        if ":" not in line:
+        if not line or ":" not in line:
             return []
 
         prefix, payload = line.split(":", 1)
@@ -254,6 +356,7 @@ class SpectoolManager:
                 )
                 self.last_update_time = now
                 self.rows_committed += 1
+                self._log_sweep(now, raw_list, analysis)
 
     # -------------------------------------------------------------------------
     # Main analysis
@@ -344,7 +447,7 @@ class SpectoolManager:
         }
 
     # -------------------------------------------------------------------------
-    # Legacy compatibility for existing frontend
+    # Legacy compatibility for frontend
     # -------------------------------------------------------------------------
 
     def _build_legacy_fields(
@@ -379,7 +482,6 @@ class SpectoolManager:
             widest = max(segments_now, key=lambda seg: seg["width_mhz"])
             active_zone = f'{widest["start_freq_mhz"]} - {widest["end_freq_mhz"]} MHz'
 
-        rf_health = verdict.get("field_status", "unknown")
         rf_health_map = {
             "good": "Goed",
             "ok": "OK",
@@ -441,7 +543,7 @@ class SpectoolManager:
             }
 
         return {
-            "rf_health": rf_health_map.get(rf_health, "Onbekend"),
+            "rf_health": rf_health_map.get(verdict.get("field_status", "unknown"), "Onbekend"),
             "noise_floor": noise_floor,
             "peak": peak_dbm,
             "peak_freq_mhz": peak_freq,
@@ -460,7 +562,7 @@ class SpectoolManager:
         }
 
     # -------------------------------------------------------------------------
-    # Window helpers
+    # Helpers
     # -------------------------------------------------------------------------
 
     def _window_entries(self, start_ts: float, end_ts: float) -> list[SweepEntry]:
@@ -471,11 +573,7 @@ class SpectoolManager:
         if not entries:
             return np.empty((0, expected_len), dtype=float)
 
-        rows = []
-        for entry in entries:
-            if len(entry.values) == expected_len:
-                rows.append(entry.values)
-
+        rows = [entry.values for entry in entries if len(entry.values) == expected_len]
         if not rows:
             return np.empty((0, expected_len), dtype=float)
 
@@ -520,10 +618,6 @@ class SpectoolManager:
             "noise_floor_estimate_dbm": round(float(np.percentile(arr, 15)), 2),
         }
 
-    # -------------------------------------------------------------------------
-    # Frequency helpers
-    # -------------------------------------------------------------------------
-
     def _get_bin_freqs(self, bins: int) -> np.ndarray:
         if self._bin_freqs_cache is not None and len(self._bin_freqs_cache) == bins:
             return self._bin_freqs_cache
@@ -531,10 +625,6 @@ class SpectoolManager:
         freqs = np.linspace(self.freq_start, self.freq_end, bins)
         self._bin_freqs_cache = freqs
         return freqs
-
-    # -------------------------------------------------------------------------
-    # Persistence / segments
-    # -------------------------------------------------------------------------
 
     def _persistent_mask(self, matrix: np.ndarray, threshold_dbm: float) -> np.ndarray:
         if matrix.size == 0:
@@ -577,10 +667,6 @@ class SpectoolManager:
             "center_freq_mhz": round(center_freq, 2),
             "width_mhz": round(width_mhz, 2),
         }
-
-    # -------------------------------------------------------------------------
-    # Interference detection
-    # -------------------------------------------------------------------------
 
     def _detect_interference(
         self,
@@ -685,19 +771,8 @@ class SpectoolManager:
         strong_ratio: float,
     ) -> dict[str, Any]:
         channel_centers = {
-            1: 2412,
-            2: 2417,
-            3: 2422,
-            4: 2427,
-            5: 2432,
-            6: 2437,
-            7: 2442,
-            8: 2447,
-            9: 2452,
-            10: 2457,
-            11: 2462,
-            12: 2467,
-            13: 2472,
+            1: 2412, 2: 2417, 3: 2422, 4: 2427, 5: 2432, 6: 2437, 7: 2442,
+            8: 2447, 9: 2452, 10: 2457, 11: 2462, 12: 2467, 13: 2472,
         }
 
         channel_energy_hits = 0
@@ -705,12 +780,8 @@ class SpectoolManager:
 
         if total_strong_bins > 0:
             for _, center in channel_centers.items():
-                left = center - 10
-                right = center + 10
-                idx = np.where((freqs >= left) & (freqs <= right))[0]
-                if len(idx) == 0:
-                    continue
-                if np.any(arr[idx] >= STRONG_SIGNAL_THRESHOLD):
+                idx = np.where((freqs >= center - 10) & (freqs <= center + 10))[0]
+                if len(idx) and np.any(arr[idx] >= STRONG_SIGNAL_THRESHOLD):
                     channel_energy_hits += 1
 
         typical_width_hits = 0
@@ -745,10 +816,6 @@ class SpectoolManager:
             "reasons": reasons,
         }
 
-    # -------------------------------------------------------------------------
-    # Channel scoring
-    # -------------------------------------------------------------------------
-
     def _score_channels(
         self,
         arr: np.ndarray,
@@ -758,19 +825,8 @@ class SpectoolManager:
         interference: dict[str, Any],
     ) -> dict[str, Any]:
         channels = {
-            1: 2412,
-            2: 2417,
-            3: 2422,
-            4: 2427,
-            5: 2432,
-            6: 2437,
-            7: 2442,
-            8: 2447,
-            9: 2452,
-            10: 2457,
-            11: 2462,
-            12: 2467,
-            13: 2472,
+            1: 2412, 2: 2417, 3: 2422, 4: 2427, 5: 2432, 6: 2437, 7: 2442,
+            8: 2447, 9: 2452, 10: 2457, 11: 2462, 12: 2467, 13: 2472,
         }
 
         scored: dict[str, Any] = {}
@@ -867,10 +923,6 @@ class SpectoolManager:
     def _normalize_peak_penalty(self, peak_dbm: float) -> float:
         value = (peak_dbm - (-90.0)) / 40.0
         return float(np.clip(value, 0.0, 1.0))
-
-    # -------------------------------------------------------------------------
-    # Final verdict
-    # -------------------------------------------------------------------------
 
     def _build_verdict(
         self,
