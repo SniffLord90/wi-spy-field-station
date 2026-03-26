@@ -1,4 +1,5 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
+
 from capture.spectool_capture import SpectoolManager
 from config.settings import HOST, PORT
 
@@ -11,6 +12,16 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/profiles")
+def profiles():
+    return jsonify(
+        {
+            "profiles": capture.get_profiles(),
+            "default_profile_key": capture.get_default_profile_key(),
+        }
+    )
+
+
 @app.route("/data")
 def data():
     return jsonify(capture.get_data())
@@ -18,14 +29,16 @@ def data():
 
 @app.route("/start", methods=["POST"])
 def start():
-    capture.start()
-    return jsonify({"ok": True, "status": "running"})
+    payload = request.get_json(silent=True) or {}
+    profile_key = payload.get("profile_key")
+    result = capture.start(profile_key=profile_key)
+    return jsonify(result)
 
 
 @app.route("/stop", methods=["POST"])
 def stop():
-    capture.stop()
-    return jsonify({"ok": True, "status": "stopped"})
+    result = capture.stop()
+    return jsonify(result)
 
 
 @app.route("/status")
