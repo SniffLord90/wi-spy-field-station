@@ -1,7 +1,0 @@
-{
-  "session_id": "20260323_225304",
-  "created_at": "2026-03-23T22:53:04.204577",
-  "freq_start_mhz": 2400.0,
-  "freq_end_mhz": 2495.0,
-  "spectool_path": "/home/jproost/spectools/spectool_raw"
-}
