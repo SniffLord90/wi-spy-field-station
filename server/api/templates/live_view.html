@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiSpy Live View</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.8.3/dist/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="topbar">
+        <div class="topbar-title">WiSpy Server - Live View</div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <p><a href="/">← Terug naar dashboard</a></p>
+            <h1>Live analyzer view</h1>
+            <p>Deze pagina toont de laatste live data van een analyzer.</p>
+        </div>
+
+        <div class="card">
+            <h2>Verbinding</h2>
+            <div class="meta-grid">
+                <strong>Analyzer ID</strong><span id="analyzerId">{{ analyzer_id }}</span>
+                <strong>Socket status</strong><span id="socketStatus">connecting...</span>
+                <strong>Laatste update</strong><span id="lastUpdate">-</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Live samenvatting</h2>
+            <div class="meta-grid">
+                <strong>Sessie ID</strong><span id="sessionId">-</span>
+                <strong>Profiel</strong><span id="profileName">-</span>
+                <strong>Noise floor</strong><span id="noiseFloor">-</span>
+                <strong>Peak power</strong><span id="peakPower">-</span>
+                <strong>Verdict</strong><span id="verdict">-</span>
+                <strong>Status</strong><span id="runningState">-</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Laatste payload</h2>
+            <pre id="payloadBox" class="code-box">{}</pre>
+        </div>
+    </div>
+
+    <script>
+        const analyzerId = "{{ analyzer_id }}";
+        const socketStatus = document.getElementById("socketStatus");
+        const lastUpdate = document.getElementById("lastUpdate");
+        const sessionIdEl = document.getElementById("sessionId");
+        const profileNameEl = document.getElementById("profileName");
+        const noiseFloorEl = document.getElementById("noiseFloor");
+        const peakPowerEl = document.getElementById("peakPower");
+        const verdictEl = document.getElementById("verdict");
+        const runningStateEl = document.getElementById("runningState");
+        const payloadBox = document.getElementById("payloadBox");
+
+        const socket = io();
+
+        socket.on("connect", () => {
+            socketStatus.textContent = "connected";
+            socket.emit("join_analyzer_room", { analyzer_id: analyzerId });
+        });
+
+        socket.on("disconnect", () => {
+            socketStatus.textContent = "disconnected";
+        });
+
+        socket.on("connect_error", (err) => {
+            socketStatus.textContent = "error: " + err.message;
+        });
+
+        socket.on("live_update", (data) => {
+            if (!data || data.analyzer_id !== analyzerId) {
+                return;
+            }
+
+            lastUpdate.textContent = data.timestamp || "-";
+            sessionIdEl.textContent = data.session_id || "-";
+            profileNameEl.textContent = data.profile_name || "-";
+            noiseFloorEl.textContent = data.noise_floor_dbm ?? "-";
+            peakPowerEl.textContent = data.peak_power_dbm ?? "-";
+            verdictEl.textContent = data.verdict || "-";
+            runningStateEl.textContent = data.running ? "running" : "idle";
+            payloadBox.textContent = JSON.stringify(data, null, 2);
+        });
+
+        fetch(`/live/state/${encodeURIComponent(analyzerId)}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.status === "ok" && data.live_state) {
+                    const live = data.live_state;
+                    lastUpdate.textContent = live.timestamp || "-";
+                    sessionIdEl.textContent = live.session_id || "-";
+                    profileNameEl.textContent = live.profile_name || "-";
+                    noiseFloorEl.textContent = live.noise_floor_dbm ?? "-";
+                    peakPowerEl.textContent = live.peak_power_dbm ?? "-";
+                    verdictEl.textContent = live.verdict || "-";
+                    runningStateEl.textContent = live.running ? "running" : "idle";
+                    payloadBox.textContent = JSON.stringify(live, null, 2);
+                }
+            })
+            .catch(() => {});
+    </script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Detail</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="topbar">
+        <div class="topbar-title">WiSpy Server - Session Detail</div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <p><a href="/history?customer_number={{ session.customer_number }}">← Terug naar historiek</a></p>
+            <h1>Sessie <span id="sessionTitle">{{ session.session_id }}</span></h1>
+            <p><strong>Laatste refresh:</strong> <span id="lastRefresh">-</span></p>
+
+            <div class="meta-grid">
+                <strong>Klantnummer</strong><span id="customerNumber">{{ session.customer_number }}</span>
+                <strong>Analyzer</strong><span id="analyzerId">{{ session.analyzer_id }}</span>
+                <strong>Profiel</strong><span id="profileName">{{ session.profile_name or '-' }}</span>
+                <strong>Status</strong><span id="sessionStatus">{{ session.status }}</span>
+                <strong>Start</strong><span id="startedAt">{{ session.started_at }}</span>
+                <strong>Einde</strong><span id="endedAt">{{ session.ended_at or '-' }}</span>
+                <strong>Data path</strong><span id="dataPath">{{ session.data_path or '-' }}</span>
+                <strong>Notities</strong><span id="notes">{{ session.notes or '-' }}</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Bestanden</h2>
+            <ul class="file-list" id="filesList">
+                {% if files %}
+                    {% for file in files %}
+                    <li>
+                        <strong>{{ file.name }}</strong><br>
+                        {{ file.size_bytes }} bytes
+                    </li>
+                    {% endfor %}
+                {% else %}
+                    <li>Geen bestanden gevonden.</li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const sessionId = "{{ session.session_id }}";
+        const customerNumber = "{{ session.customer_number }}";
+
+        const lastRefresh = document.getElementById("lastRefresh");
+        const sessionTitle = document.getElementById("sessionTitle");
+        const customerNumberEl = document.getElementById("customerNumber");
+        const analyzerIdEl = document.getElementById("analyzerId");
+        const profileNameEl = document.getElementById("profileName");
+        const sessionStatusEl = document.getElementById("sessionStatus");
+        const startedAtEl = document.getElementById("startedAt");
+        const endedAtEl = document.getElementById("endedAt");
+        const dataPathEl = document.getElementById("dataPath");
+        const notesEl = document.getElementById("notes");
+        const filesList = document.getElementById("filesList");
+
+        async function refreshSessionDetail() {
+            try {
+                const [sessionRes, filesRes] = await Promise.all([
+                    fetch(`/sessions/detail/${encodeURIComponent(sessionId)}?customer_number=${encodeURIComponent(customerNumber)}`),
+                    fetch(`/sessions/${encodeURIComponent(sessionId)}/files?customer_number=${encodeURIComponent(customerNumber)}`)
+                ]);
+
+                const sessionData = await sessionRes.json();
+                const filesData = await filesRes.json();
+
+                if (sessionData.status === "ok" && sessionData.session) {
+                    const session = sessionData.session;
+
+                    sessionTitle.textContent = session.session_id || "-";
+                    customerNumberEl.textContent = session.customer_number || "-";
+                    analyzerIdEl.textContent = session.analyzer_id || "-";
+                    profileNameEl.textContent = session.profile_name || "-";
+                    sessionStatusEl.textContent = session.status || "-";
+                    startedAtEl.textContent = session.started_at || "-";
+                    endedAtEl.textContent = session.ended_at || "-";
+                    dataPathEl.textContent = session.data_path || "-";
+                    notesEl.textContent = session.notes || "-";
+                }
+
+                if (filesData.status === "ok") {
+                    const files = filesData.files || [];
+
+                    if (files.length > 0) {
+                        filesList.innerHTML = files.map(file => `
+                            <li>
+                                <strong>${file.name}</strong><br>
+                                ${file.size_bytes} bytes
+                            </li>
+                        `).join("");
+                    } else {
+                        filesList.innerHTML = `<li>Geen bestanden gevonden.</li>`;
+                    }
+                }
+
+                lastRefresh.textContent = new Date().toLocaleTimeString();
+            } catch (error) {
+                console.error("Fout bij refresh session detail:", error);
+            }
+        }
+
+        refreshSessionDetail();
+        setInterval(refreshSessionDetail, 3000);
+    </script>
+</body>
+</html>

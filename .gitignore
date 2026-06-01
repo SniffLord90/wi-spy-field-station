@@ -1,7 +1,46 @@
-venv/
+# Python
 __pycache__/
 *.pyc
-data/logs/
-data/captures/
-data/exports/logs/
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs / runtime data
 logs/
+*.log
+
+# Uploads / generated data
+uploads/
+data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Test / scratch / local artifacts
+extra-analysis.json
+test-sweeps.json.txt
+test-sweeps.jsonl
+Test-upload.txt
+
+# Local backup folders
+backup_pre_autostart_online/
+backup_pre_sprint1/
+backups/
+
+# Server runtime folders inside monorepo
+server/logs/
+server/uploads/
+
+# Pi runtime folders inside monorepo
+pi/logs/
+pi/data/

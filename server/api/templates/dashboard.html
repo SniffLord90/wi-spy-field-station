@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiSpy Server Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="topbar">
+        <div class="topbar-title">WiSpy Server - Dashboard</div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h1>Welkom</h1>
+            <p>Dit is het centrale dashboard van je WiSpy server.</p>
+            <p><strong>Laatste refresh:</strong> <span id="lastRefresh">-</span></p>
+        </div>
+
+        <div class="card">
+            <h2>Overzicht</h2>
+
+            <div class="nav-grid">
+                <a class="nav-card" href="/analyzers/view">
+                    <div class="nav-card-title">Analyzers</div>
+                    <div class="stat-number" id="statTotalAnalyzers">{{ stats.total_analyzers }}</div>
+                    <div class="nav-card-text">Totaal geregistreerde analyzers</div>
+                </a>
+
+                <div class="nav-card">
+                    <div class="nav-card-title">Sessies</div>
+                    <div class="stat-number" id="statTotalSessions">{{ stats.total_sessions }}</div>
+                    <div class="nav-card-text">Totaal opgeslagen sessies</div>
+                </div>
+
+                <div class="nav-card">
+                    <div class="nav-card-title">Actieve sessies</div>
+                    <div class="stat-number" id="statRunningSessions">{{ stats.running_sessions }}</div>
+                    <div class="nav-card-text">Sessies die nog als running staan</div>
+                </div>
+
+                <div class="nav-card">
+                    <div class="nav-card-title">Online analyzers</div>
+                    <div class="stat-number" id="statOnlineAnalyzers">{{ stats.online_analyzers }}</div>
+                    <div class="nav-card-text">Analyzers met status online</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Snel naar</h2>
+
+            <div class="nav-grid">
+                <a class="nav-card" href="/analyzers/view">
+                    <div class="nav-card-title">Analyzers</div>
+                    <div class="nav-card-text">Bekijk alle geregistreerde analyzers en hun status.</div>
+                </a>
+
+                <a class="nav-card" href="/history">
+                    <div class="nav-card-title">Historiek</div>
+                    <div class="nav-card-text">Zoek sessies op klantnummer en bekijk details en bestanden.</div>
+                </a>
+
+                <a class="nav-card" href="/live/view/analyzer-01">
+                    <div class="nav-card-title">Live testview</div>
+                    <div class="nav-card-text">Open een eerste live pagina voor analyzer-01.</div>
+                </a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Recentste sessies</h2>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Sessie ID</th>
+                        <th>Klantnummer</th>
+                        <th>Analyzer</th>
+                        <th>Status</th>
+                        <th>Start</th>
+                        <th>Detail</th>
+                    </tr>
+                </thead>
+                <tbody id="recentSessionsBody">
+                    {% if recent_sessions %}
+                        {% for session in recent_sessions %}
+                        <tr>
+                            <td>{{ session.session_id }}</td>
+                            <td>{{ session.customer_number }}</td>
+                            <td>{{ session.analyzer_id }}</td>
+                            <td>
+                                {% if session.status == 'finished' %}
+                                    <span class="badge badge-finished">finished</span>
+                                {% else %}
+                                    <span class="badge badge-running">{{ session.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ session.started_at }}</td>
+                            <td>
+                                <a href="/sessions/{{ session.session_id }}/view?customer_number={{ session.customer_number }}">
+                                    Open
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6">Nog geen sessies gevonden.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Recentst geziene analyzers</h2>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Analyzer ID</th>
+                        <th>Naam</th>
+                        <th>Locatie</th>
+                        <th>Status</th>
+                        <th>Current session</th>
+                        <th>Current profile</th>
+                        <th>Last seen</th>
+                        <th>Live</th>
+                    </tr>
+                </thead>
+                <tbody id="recentAnalyzersBody">
+                    {% if recent_analyzers %}
+                        {% for analyzer in recent_analyzers %}
+                        <tr>
+                            <td>{{ analyzer.analyzer_id }}</td>
+                            <td>{{ analyzer.name or '-' }}</td>
+                            <td>{{ analyzer.location or '-' }}</td>
+                            <td>
+                                {% if analyzer.status == 'online' %}
+                                    <span class="badge badge-finished">online</span>
+                                {% else %}
+                                    <span class="badge badge-running">{{ analyzer.status or 'offline' }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ analyzer.current_session_id or '-' }}</td>
+                            <td>{{ analyzer.current_profile or '-' }}</td>
+                            <td>{{ analyzer.last_seen or '-' }}</td>
+                            <td>
+                                <a href="/live/view/{{ analyzer.analyzer_id }}">Open live</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="8">Nog geen analyzers gevonden.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const lastRefresh = document.getElementById("lastRefresh");
+        const statTotalAnalyzers = document.getElementById("statTotalAnalyzers");
+        const statTotalSessions = document.getElementById("statTotalSessions");
+        const statRunningSessions = document.getElementById("statRunningSessions");
+        const statOnlineAnalyzers = document.getElementById("statOnlineAnalyzers");
+        const recentSessionsBody = document.getElementById("recentSessionsBody");
+        const recentAnalyzersBody = document.getElementById("recentAnalyzersBody");
+
+        function badgeHtml(status, onlineWord = "online") {
+            if (status === "online" || status === "finished") {
+                return `<span class="badge badge-finished">${status === "online" ? onlineWord : "finished"}</span>`;
+            }
+            return `<span class="badge badge-running">${status || "offline"}</span>`;
+        }
+
+        async function refreshDashboard() {
+            try {
+                const [analyzersRes, sessionsRes] = await Promise.all([
+                    fetch("/analyzers"),
+                    fetch("/sessions")
+                ]);
+
+                const analyzersData = await analyzersRes.json();
+                const sessionsData = await sessionsRes.json();
+
+                if (analyzersData.status === "ok" && sessionsData.status === "ok") {
+                    const analyzers = analyzersData.analyzers || [];
+                    const sessions = sessionsData.sessions || [];
+
+                    const onlineAnalyzers = analyzers.filter(a => a.status === "online").length;
+                    const runningSessions = sessions.filter(s => s.status === "running").length;
+
+                    statTotalAnalyzers.textContent = analyzers.length;
+                    statOnlineAnalyzers.textContent = onlineAnalyzers;
+                    statTotalSessions.textContent = sessions.length;
+                    statRunningSessions.textContent = runningSessions;
+
+                    const recentSessions = sessions.slice(0, 5);
+                    if (recentSessions.length > 0) {
+                        recentSessionsBody.innerHTML = recentSessions.map(session => `
+                            <tr>
+                                <td>${session.session_id || "-"}</td>
+                                <td>${session.customer_number || "-"}</td>
+                                <td>${session.analyzer_id || "-"}</td>
+                                <td>${badgeHtml(session.status)}</td>
+                                <td>${session.started_at || "-"}</td>
+                                <td><a href="/sessions/${session.session_id}/view?customer_number=${session.customer_number}">Open</a></td>
+                            </tr>
+                        `).join("");
+                    } else {
+                        recentSessionsBody.innerHTML = `
+                            <tr>
+                                <td colspan="6">Nog geen sessies gevonden.</td>
+                            </tr>
+                        `;
+                    }
+
+                    const recentAnalyzers = analyzers
+                        .sort((a, b) => {
+                            const aTime = a.last_seen ? new Date(a.last_seen).getTime() : 0;
+                            const bTime = b.last_seen ? new Date(b.last_seen).getTime() : 0;
+                            return bTime - aTime;
+                        })
+                        .slice(0, 5);
+
+                    if (recentAnalyzers.length > 0) {
+                        recentAnalyzersBody.innerHTML = recentAnalyzers.map(analyzer => `
+                            <tr>
+                                <td>${analyzer.analyzer_id || "-"}</td>
+                                <td>${analyzer.name || "-"}</td>
+                                <td>${analyzer.location || "-"}</td>
+                                <td>${badgeHtml(analyzer.status, "online")}</td>
+                                <td>${analyzer.current_session_id || "-"}</td>
+                                <td>${analyzer.current_profile || "-"}</td>
+                                <td>${analyzer.last_seen || "-"}</td>
+                                <td><a href="/live/view/${analyzer.analyzer_id}">Open live</a></td>
+                            </tr>
+                        `).join("");
+                    } else {
+                        recentAnalyzersBody.innerHTML = `
+                            <tr>
+                                <td colspan="8">Nog geen analyzers gevonden.</td>
+                            </tr>
+                        `;
+                    }
+
+                    lastRefresh.textContent = new Date().toLocaleTimeString();
+                }
+            } catch (error) {
+                console.error("Fout bij dashboard refresh:", error);
+            }
+        }
+
+        refreshDashboard();
+        setInterval(refreshDashboard, 3000);
+    </script>
+</body>
+</html>

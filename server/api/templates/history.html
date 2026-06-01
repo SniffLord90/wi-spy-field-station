@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiSpy History</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="topbar">
+        <div class="topbar-title">WiSpy Server - History</div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h1>Zoeken op klantnummer</h1>
+            <form method="get" action="/history">
+                <input
+                    type="text"
+                    name="customer_number"
+                    placeholder="Bijv. 12345678"
+                    value="{{ customer_number or '' }}"
+                >
+                <button type="submit">Zoeken</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Sessies</h2>
+
+            {% if sessions %}
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Sessie ID</th>
+                            <th>Klantnummer</th>
+                            <th>Analyzer</th>
+                            <th>Profiel</th>
+                            <th>Status</th>
+                            <th>Start</th>
+                            <th>Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for session in sessions %}
+                        <tr>
+                            <td>{{ session.session_id }}</td>
+                            <td>{{ session.customer_number }}</td>
+                            <td>{{ session.analyzer_id }}</td>
+                            <td>{{ session.profile_name or '-' }}</td>
+                            <td>
+                                {% if session.status == 'finished' %}
+                                    <span class="badge badge-finished">finished</span>
+                                {% else %}
+                                    <span class="badge badge-running">{{ session.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ session.started_at }}</td>
+                            <td>
+                                <a href="/sessions/{{ session.session_id }}/view?customer_number={{ session.customer_number }}">
+                                    Open
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p>Geen sessies gevonden.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

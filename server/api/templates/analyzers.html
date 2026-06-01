@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiSpy Analyzers</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="topbar">
+        <div class="topbar-title">WiSpy Server - Analyzers</div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <p><a href="/">← Terug naar dashboard</a></p>
+            <h1>Analyzer overzicht</h1>
+            <p>Hier zie je alle geregistreerde analyzers op de server.</p>
+            <p><strong>Laatste refresh:</strong> <span id="lastRefresh">-</span></p>
+        </div>
+
+        <div class="card">
+            <h2>Analyzers</h2>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Analyzer ID</th>
+                        <th>Naam</th>
+                        <th>Locatie</th>
+                        <th>Status</th>
+                        <th>Current session</th>
+                        <th>Current profile</th>
+                        <th>Last seen</th>
+                        <th>Analyzer</th>
+                        <th>Live</th>
+                    </tr>
+                </thead>
+                <tbody id="analyzersTableBody">
+                    {% if analyzers %}
+                        {% for analyzer in analyzers %}
+                        <tr>
+                            <td>{{ analyzer.analyzer_id }}</td>
+                            <td>{{ analyzer.name or '-' }}</td>
+                            <td>{{ analyzer.location or '-' }}</td>
+                            <td>
+                                {% if analyzer.status == 'online' %}
+                                    <span class="badge badge-finished">online</span>
+                                {% else %}
+                                    <span class="badge badge-running">{{ analyzer.status or 'offline' }}</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ analyzer.current_session_id or '-' }}</td>
+                            <td>{{ analyzer.current_profile or '-' }}</td>
+                            <td>{{ analyzer.last_seen or '-' }}</td>
+                            <td><a href="/analyzers/{{ analyzer.analyzer_id }}/view">Open analyzer</a></td>
+                            <td><a href="/live/view/{{ analyzer.analyzer_id }}">Open live</a></td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="9">Er zijn nog geen analyzers geregistreerd.</td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const tableBody = document.getElementById("analyzersTableBody");
+        const lastRefresh = document.getElementById("lastRefresh");
+
+        function badgeHtml(status) {
+            if (status === "online") {
+                return '<span class="badge badge-finished">online</span>';
+            }
+            return `<span class="badge badge-running">${status || "offline"}</span>`;
+        }
+
+        function renderAnalyzers(analyzers) {
+            if (!analyzers || analyzers.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="9">Er zijn nog geen analyzers geregistreerd.</td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tableBody.innerHTML = analyzers.map(analyzer => `
+                <tr>
+                    <td>${analyzer.analyzer_id || "-"}</td>
+                    <td>${analyzer.name || "-"}</td>
+                    <td>${analyzer.location || "-"}</td>
+                    <td>${badgeHtml(analyzer.status)}</td>
+                    <td>${analyzer.current_session_id || "-"}</td>
+                    <td>${analyzer.current_profile || "-"}</td>
+                    <td>${analyzer.last_seen || "-"}</td>
+                    <td><a href="/analyzers/${analyzer.analyzer_id}/view">Open analyzer</a></td>
+                    <td><a href="/live/view/${analyzer.analyzer_id}">Open live</a></td>
+                </tr>
+            `).join("");
+        }
+
+        async function refreshAnalyzers() {
+            try {
+                const response = await fetch("/analyzers");
+                const data = await response.json();
+
+                if (data.status === "ok") {
+                    renderAnalyzers(data.analyzers);
+                    lastRefresh.textContent = new Date().toLocaleTimeString();
+                }
+            } catch (error) {
+                console.error("Fout bij ophalen analyzers:", error);
+            }
+        }
+
+        refreshAnalyzers();
+        setInterval(refreshAnalyzers, 3000);
+    </script>
+</body>
+</html>
