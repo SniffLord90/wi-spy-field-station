@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -14,6 +14,7 @@ from config.settings import (
     DBM_MAX,
     DBM_MIN,
     DEFAULT_PROFILE_KEY,
+    LIVE_UPDATE_INTERVAL_SECONDS,
     LOG_DIR,
     LONG_WINDOW_SECONDS,
     MAX_ROWS,
@@ -39,7 +40,7 @@ class SweepEntry:
 
 
 class SpectoolManager:
-    def __init__(self) -> None:
+    def __init__(self, live_update_hook: Callable[[dict[str, Any]], Any] | None = None) -> None:
         self.lock = threading.RLock()
 
         self.running = False
@@ -68,6 +69,25 @@ class SpectoolManager:
         self.session_start_ts: float | None = None
         self.session_file = None
         self.session_rows_logged = 0
+
+        self.live_update_hook = live_update_hook
+        self.remote_session_id: str | None = None
+        self.remote_profile_name: str | None = None
+        self._last_live_update_push_ts: float = 0.0
+
+    # -------------------------------------------------------------------------
+    # Remote session context
+    # -------------------------------------------------------------------------
+
+    def set_remote_session_context(self, session_id: str | None, profile_name: str | None) -> None:
+        with self.lock:
+            self.remote_session_id = session_id
+            self.remote_profile_name = profile_name
+
+    def clear_remote_session_context(self) -> None:
+        with self.lock:
+            self.remote_session_id = None
+            self.remote_profile_name = None
 
     # -------------------------------------------------------------------------
     # Profiles
@@ -123,6 +143,7 @@ class SpectoolManager:
             self.rows_committed = 0
             self.expected_bins = None
             self._bin_freqs_cache = None
+            self._last_live_update_push_ts = 0.0
 
             self._start_session_logging()
 
@@ -175,6 +196,8 @@ class SpectoolManager:
                 "session_dir": str(self.session_dir) if self.session_dir else None,
                 "active_profile_key": self.active_profile_key,
                 "active_profile": dict(self.active_profile),
+                "remote_session_id": self.remote_session_id,
+                "remote_profile_name": self.remote_profile_name,
             }
 
     def get_latest_data(self) -> dict[str, Any]:
@@ -283,6 +306,47 @@ class SpectoolManager:
             self.session_rows_logged += 1
         except Exception:
             pass
+
+    # -------------------------------------------------------------------------
+    # Live update helper
+    # -------------------------------------------------------------------------
+
+    def _build_live_payload(self, ts: float, analysis: dict[str, Any]) -> dict[str, Any]:
+        verdict = analysis.get("verdict", {}) or {}
+
+        latest_sweep = list(self.latest_sweep) if self.latest_sweep else []
+        axis_labels = list(self.active_profile.get("axis_labels_mhz", []))
+
+        return {
+            "session_id": self.remote_session_id or self.session_id,
+            "timestamp": datetime.fromtimestamp(ts).isoformat(),
+            "profile_name": self.remote_profile_name or self.active_profile.get("label"),
+            "profile_key": self.active_profile_key,
+            "freq_start_mhz": self.active_profile.get("freq_start_mhz"),
+            "freq_end_mhz": self.active_profile.get("freq_end_mhz"),
+            "axis_labels_mhz": axis_labels,
+            "noise_floor_dbm": analysis.get("noise_floor"),
+            "peak_power_dbm": analysis.get("peak"),
+            "peak_freq_mhz": analysis.get("peak_freq_mhz"),
+            "verdict": verdict.get("summary") or analysis.get("interference_label") or "Live update",
+            "running": self.running,
+            "latest_sweep": latest_sweep,
+        }
+
+    def _maybe_send_live_update(self, ts: float, analysis: dict[str, Any]) -> None:
+        if not self.live_update_hook:
+            return
+
+        if (ts - self._last_live_update_push_ts) < LIVE_UPDATE_INTERVAL_SECONDS:
+            return
+
+        payload = self._build_live_payload(ts, analysis)
+
+        try:
+            self.live_update_hook(payload)
+            self._last_live_update_push_ts = ts
+        except Exception as exc:
+            print(f"[spectool_capture] live update hook failed: {exc}")
 
     # -------------------------------------------------------------------------
     # Spectool process handling
@@ -409,6 +473,7 @@ class SpectoolManager:
                 self.last_update_time = now
                 self.rows_committed += 1
                 self._log_sweep(now, raw_list, analysis)
+                self._maybe_send_live_update(now, analysis)
 
     # -------------------------------------------------------------------------
     # Main analysis

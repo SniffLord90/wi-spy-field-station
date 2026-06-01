@@ -23,6 +23,8 @@ const helpModalEl = document.getElementById("helpModal");
 const followLiveBtn = document.getElementById("followLiveBtn");
 const resetMaxHoldBtn = document.getElementById("resetMaxHoldBtn");
 const profileSelect = document.getElementById("profileSelect");
+const customerNumberInput = document.getElementById("customerNumberInput");
+const notesInput = document.getElementById("notesInput");
 
 const profileInfoEl = document.getElementById("profileInfo");
 const statusEl = document.getElementById("status");
@@ -120,6 +122,8 @@ function updateButtons(running) {
   startBtn.disabled = !!running;
   stopBtn.disabled = !running;
   profileSelect.disabled = !!running;
+  customerNumberInput.disabled = !!running;
+  notesInput.disabled = !!running;
 }
 
 function numberClassFromScore(score) {
@@ -784,13 +788,26 @@ function appendLatestSweepIfNeeded(data) {
 
 async function startCapture() {
   const selectedKey = profileSelect.value || defaultProfileKey;
+  const customerNumber = (customerNumberInput.value || "").trim();
+  const notes = (notesInput.value || "").trim();
+
+  if (!customerNumber) {
+    alert("Vul eerst een klantnummer in.");
+    customerNumberInput.focus();
+    return;
+  }
+
   resetSessionState();
   setFieldDefaults();
 
   const res = await fetch("/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ profile_key: selectedKey }),
+    body: JSON.stringify({
+      profile_key: selectedKey,
+      customer_number: customerNumber,
+      notes: notes
+    }),
   });
 
   const data = await res.json();

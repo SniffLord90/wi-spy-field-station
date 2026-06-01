@@ -14,9 +14,27 @@
       <option value="">Profielen laden...</option>
     </select>
 
+    <input
+      id="customerNumberInput"
+      type="text"
+      placeholder="Klantnummer"
+      autocomplete="off"
+      inputmode="numeric"
+      style="min-width: 180px;"
+    >
+
     <button id="startBtn" type="button">Start meting</button>
     <button id="stopBtn" type="button">Stop meting</button>
     <button id="helpBtn" type="button">Herkenningshulp</button>
+  </div>
+
+  <div class="toolbar" style="margin-top: 8px;">
+    <textarea
+      id="notesInput"
+      placeholder="Notities"
+      rows="3"
+      style="width: 100%; max-width: 520px; resize: vertical;"
+    ></textarea>
   </div>
 
   <div class="status" id="profileInfo">Nog geen profiel geladen</div>
