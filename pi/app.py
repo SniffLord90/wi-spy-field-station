@@ -1,13 +1,300 @@
+import json
+import shutil
+from datetime import datetime
+from pathlib import Path
+
 from flask import Flask, jsonify, render_template, request, url_for
+from server_client import ServerClient
+from heartbeat_worker import HeartbeatWorker
 
 from capture.spectool_capture import SpectoolManager
-from config.settings import HOST, PORT
+from config.settings import HOST, PORT, LOG_DIR
 from wifi_manager import WifiManager
 
 app = Flask(__name__)
 
-capture = SpectoolManager()
+server_client = ServerClient()
+heartbeat_worker = HeartbeatWorker()
+
+current_remote_session_id = None
+current_remote_profile = None
+current_customer_number = None
+
+
+def push_live_update(payload: dict):
+    result = server_client.send_live_update(payload)
+    print("[app] send_live_update result:", result)
+
+
+capture = SpectoolManager(live_update_hook=push_live_update)
 wifi = WifiManager()
+
+
+def upload_state_path_for_session_dir(session_dir: str | Path) -> Path:
+    return Path(session_dir) / "upload_state.json"
+
+
+def write_upload_state(
+    session_dir: str | Path,
+    *,
+    remote_session_id: str,
+    customer_number: str,
+    status: str,
+    upload_result: dict | None = None,
+) -> Path:
+    path = upload_state_path_for_session_dir(session_dir)
+    payload = {
+        "remote_session_id": remote_session_id,
+        "customer_number": customer_number,
+        "session_dir": str(session_dir),
+        "status": status,
+        "updated_at": datetime.now().isoformat(),
+        "upload_result": upload_result,
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def read_upload_state(path: str | Path) -> dict | None:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[app] Failed to read upload state {path}: {exc}")
+        return None
+
+
+def mark_upload_state_uploaded(
+    session_dir: str | Path,
+    *,
+    remote_session_id: str,
+    customer_number: str,
+    upload_result: dict | None = None,
+):
+    write_upload_state(
+        session_dir,
+        remote_session_id=remote_session_id,
+        customer_number=customer_number,
+        status="uploaded",
+        upload_result=upload_result,
+    )
+
+
+def mark_upload_state_pending(
+    session_dir: str | Path,
+    *,
+    remote_session_id: str,
+    customer_number: str,
+    upload_result: dict | None = None,
+):
+    write_upload_state(
+        session_dir,
+        remote_session_id=remote_session_id,
+        customer_number=customer_number,
+        status="pending_upload",
+        upload_result=upload_result,
+    )
+
+
+def cleanup_session_dir(session_dir: str | Path) -> dict:
+    session_path = Path(session_dir)
+
+    if not session_path.exists():
+        return {
+            "ok": True,
+            "reason": "already_missing",
+            "session_dir": str(session_path),
+        }
+
+    try:
+        shutil.rmtree(session_path)
+        print(f"[app] Cleaned up local session dir: {session_path}")
+        return {
+            "ok": True,
+            "reason": "deleted",
+            "session_dir": str(session_path),
+        }
+    except Exception as exc:
+        print(f"[app] Failed to clean up session dir {session_path}: {exc}")
+        return {
+            "ok": False,
+            "reason": str(exc),
+            "session_dir": str(session_path),
+        }
+
+
+def scan_upload_states() -> list[Path]:
+    log_root = Path(LOG_DIR)
+    if not log_root.exists():
+        return []
+
+    return list(log_root.glob("*/upload_state.json"))
+
+
+def retry_pending_uploads():
+    state_files = scan_upload_states()
+    pending_files: list[Path] = []
+
+    for state_file in state_files:
+        data = read_upload_state(state_file)
+        if not data:
+            continue
+
+        if data.get("status") == "pending_upload":
+            pending_files.append(state_file)
+
+    print(f"[app] Pending upload states found: {len(pending_files)}")
+
+    for state_file in pending_files:
+        data = read_upload_state(state_file)
+        if not data:
+            continue
+
+        remote_session_id = data.get("remote_session_id")
+        customer_number = data.get("customer_number")
+        session_dir = data.get("session_dir")
+
+        if not remote_session_id or not customer_number or not session_dir:
+            print(f"[app] Invalid pending upload state: {state_file}")
+            continue
+
+        print(
+            "[app] Retrying pending upload:",
+            f"session={remote_session_id}",
+            f"customer={customer_number}",
+            f"dir={session_dir}",
+        )
+
+        upload_result = server_client.upload_session_artifacts(
+            session_id=remote_session_id,
+            customer_number=customer_number,
+            session_dir=session_dir,
+        )
+        print("[app] retry upload_session_artifacts result:", upload_result)
+
+        if upload_result.get("ok"):
+            mark_upload_state_uploaded(
+                session_dir=session_dir,
+                remote_session_id=remote_session_id,
+                customer_number=customer_number,
+                upload_result=upload_result,
+            )
+            cleanup_result = cleanup_session_dir(session_dir)
+            print("[app] retry cleanup result:", cleanup_result)
+        else:
+            mark_upload_state_pending(
+                session_dir=session_dir,
+                remote_session_id=remote_session_id,
+                customer_number=customer_number,
+                upload_result=upload_result,
+            )
+
+
+def cleanup_uploaded_sessions():
+    state_files = scan_upload_states()
+    uploaded_files: list[Path] = []
+
+    for state_file in state_files:
+        data = read_upload_state(state_file)
+        if not data:
+            continue
+
+        if data.get("status") == "uploaded":
+            uploaded_files.append(state_file)
+
+    print(f"[app] Uploaded session states found for cleanup: {len(uploaded_files)}")
+
+    for state_file in uploaded_files:
+        data = read_upload_state(state_file)
+        if not data:
+            continue
+
+        session_dir = data.get("session_dir")
+        if not session_dir:
+            continue
+
+        cleanup_result = cleanup_session_dir(session_dir)
+        print("[app] startup cleanup result:", cleanup_result)
+
+
+def bootstrap_server_integration():
+    print("[app] Bootstrapping server integration...")
+
+    register_result = server_client.register_analyzer()
+    print("[app] register_analyzer result:", register_result)
+
+    heartbeat_worker.update_state(
+        current_session_id=None,
+        current_profile=None,
+        status="online",
+    )
+    heartbeat_worker.start()
+
+    print("[app] Heartbeat worker started.")
+
+    retry_pending_uploads()
+    cleanup_uploaded_sessions()
+
+
+def build_remote_session_id() -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{timestamp}_{server_client.analyzer_id}"
+
+
+def send_final_stopped_live_update():
+    global current_remote_session_id
+    global current_remote_profile
+
+    latest_data = capture.get_data()
+    latest_analysis = latest_data.get("analysis") or {}
+
+    payload = {
+        "session_id": current_remote_session_id,
+        "timestamp": datetime.now().isoformat(),
+        "profile_name": current_remote_profile,
+        "noise_floor_dbm": latest_analysis.get("noise_floor"),
+        "peak_power_dbm": latest_analysis.get("peak"),
+        "verdict": "Meting gestopt",
+        "running": False,
+    }
+
+    push_live_update(payload)
+
+
+def try_upload_session_artifacts():
+    global current_remote_session_id
+    global current_customer_number
+
+    status = capture.get_status()
+    session_dir = status.get("session_dir")
+
+    if not current_remote_session_id:
+        print("[app] No remote session id available for upload.")
+        return {
+            "ok": False,
+            "reason": "missing_remote_session_id",
+        }
+
+    if not current_customer_number:
+        print("[app] No customer number available for upload.")
+        return {
+            "ok": False,
+            "reason": "missing_customer_number",
+        }
+
+    if not session_dir:
+        print("[app] No local session_dir available for upload.")
+        return {
+            "ok": False,
+            "reason": "missing_session_dir",
+        }
+
+    upload_result = server_client.upload_session_artifacts(
+        session_id=current_remote_session_id,
+        customer_number=current_customer_number,
+        session_dir=session_dir,
+    )
+    print("[app] upload_session_artifacts result:", upload_result)
+    return upload_result
 
 
 def inject_once(html: str, marker: str, snippet: str, *, before: bool = True) -> str:
@@ -123,15 +410,106 @@ def data():
 
 @app.route("/start", methods=["POST"])
 def start():
+    global current_remote_session_id
+    global current_remote_profile
+    global current_customer_number
+
     payload = request.get_json(silent=True) or {}
     profile_key = payload.get("profile_key")
+    customer_number = (payload.get("customer_number") or "PENDING").strip()
+    notes = payload.get("notes") or ""
+
     result = capture.start(profile_key=profile_key)
+
+    if result.get("ok"):
+        session_id = build_remote_session_id()
+        profile_name = profile_key or "default"
+
+        remote_result = server_client.start_remote_session(
+            session_id=session_id,
+            customer_number=customer_number,
+            profile_name=profile_name,
+            notes=notes,
+        )
+        print("[app] start_remote_session result:", remote_result)
+
+        current_remote_session_id = session_id
+        current_remote_profile = profile_name
+        current_customer_number = customer_number
+
+        capture.set_remote_session_context(
+            session_id=current_remote_session_id,
+            profile_name=current_remote_profile,
+        )
+
+        heartbeat_worker.update_state(
+            current_session_id=current_remote_session_id,
+            current_profile=current_remote_profile,
+            status="online",
+        )
+
+        result["remote_session_id"] = current_remote_session_id
+        result["remote_customer_number"] = current_customer_number
+
     return jsonify(result)
 
 
 @app.route("/stop", methods=["POST"])
 def stop():
+    global current_remote_session_id
+    global current_remote_profile
+    global current_customer_number
+
     result = capture.stop()
+
+    upload_result = None
+    cleanup_result = None
+    status = capture.get_status()
+    session_dir = status.get("session_dir")
+
+    if current_remote_session_id:
+        send_final_stopped_live_update()
+
+        finish_result = server_client.finish_remote_session(current_remote_session_id)
+        print("[app] finish_remote_session result:", finish_result)
+
+        upload_result = try_upload_session_artifacts()
+
+        if session_dir and current_customer_number:
+            if upload_result and upload_result.get("ok"):
+                mark_upload_state_uploaded(
+                    session_dir=session_dir,
+                    remote_session_id=current_remote_session_id,
+                    customer_number=current_customer_number,
+                    upload_result=upload_result,
+                )
+                cleanup_result = cleanup_session_dir(session_dir)
+            else:
+                mark_upload_state_pending(
+                    session_dir=session_dir,
+                    remote_session_id=current_remote_session_id,
+                    customer_number=current_customer_number,
+                    upload_result=upload_result,
+                )
+
+    capture.clear_remote_session_context()
+
+    current_remote_session_id = None
+    current_remote_profile = None
+    current_customer_number = None
+
+    heartbeat_worker.update_state(
+        current_session_id=None,
+        current_profile=None,
+        status="online",
+    )
+
+    if upload_result is not None:
+        result["upload_result"] = upload_result
+
+    if cleanup_result is not None:
+        result["cleanup_result"] = cleanup_result
+
     return jsonify(result)
 
 
@@ -173,4 +551,5 @@ def wifi_disconnect():
 
 
 if __name__ == "__main__":
+    bootstrap_server_integration()
     app.run(host=HOST, port=PORT, debug=False, threaded=True)
